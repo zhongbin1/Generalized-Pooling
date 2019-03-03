@@ -7,7 +7,7 @@ Note that this code is not the offical implement, you can find it [here](https:/
 
 **mask**: The calculation of attention weights should mask the padding tokens.
 
-**num_classes**: Specificily, we choose the Natural Language Inference(NLI) as the downstream task with the number of label classes as 2. Of cause, you can change it to satisfy your own data and task.
+**num_classes**: Specifically, we choose the Natural Language Inference(NLI) as the downstream task with the number of label classes as 2. Of cause, you can change it to satisfy your own data and task.
 
 **penalty_type**: Author proposed three types of penalization terms, i.e. Parameter Matrices, Attention Matrices and Sentence Embeddings. We choose the first type in our implementation.
 
