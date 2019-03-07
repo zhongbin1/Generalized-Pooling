@@ -8,7 +8,7 @@ def dense_layer(inputs, kernel_size, num_filters, keep_prob, scope, regularizer=
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         input_size = inputs.get_shape()[-1]  # [batch_size, max_len, input_size]
         W = tf.get_variable("W", shape=[kernel_size, input_size, num_filters],
-                            initializer=tf.truncated_normal_initializer())
+                            initializer=tf.truncated_normal_initializer(), regularizer=regularizer)
         outputs = tf.nn.conv1d(inputs, W, 1, padding='SAME')
         outputs = tf.nn.leaky_relu(outputs)
         outputs = tf.nn.dropout(outputs, keep_prob=keep_prob)  # [batch_size, max_len, num_filters]
@@ -38,7 +38,7 @@ class SDA(object):
     def __init__(self, max_len_left, max_len_right, vocab_size,
                  embedding_size, num_hidden,
                  d_1, d_l, k_1, k_2, num_layers, d_c,
-                 num_attentions, d_o, num_iter, l2_reg_lambda=0.0):
+                 num_attentions, d_o, num_iter, mu=1e-2, l2_reg_lambda=0.0):
 
         regularizer = layers.l2_regularizer(l2_reg_lambda)
 
