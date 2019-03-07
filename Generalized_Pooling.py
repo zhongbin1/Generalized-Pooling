@@ -149,8 +149,9 @@ class GeneralizedPooling(object):
             W = tf.get_variable(
                 "W_output",
                 shape=[num_hidden, 2],
-                initializer=tf.contrib.layers.xavier_initializer())
-            b = tf.Variable(tf.constant(0.1, shape=[2]), name="b_output")
+                initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+            b = tf.get_variable("b_output", dtype=tf.float32, initializer=tf.constant_initializer(0.1),
+                                regularizer= regularizer)
             self.scores = tf.nn.xw_plus_b(self.full_out, W, b, name="scores")
             self.predictions = tf.argmax(self.scores, 1, name="predictions")
 
