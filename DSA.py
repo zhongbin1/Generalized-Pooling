@@ -7,9 +7,11 @@ from tensorflow.contrib import layers
 def dense_layer(inputs, kernel_size, num_filters, keep_prob, scope, regularizer=None):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         input_size = inputs.get_shape()[-1]  # [batch_size, max_len, input_size]
-        W = tf.get_variable("W", shape=[kernel_size, input_size, num_filters],
-                            initializer=tf.truncated_normal_initializer(), regularizer=regularizer)
-        outputs = tf.nn.conv1d(inputs, W, 1, padding='SAME')
+        W = tf.get_variable("W", shape=[kernel_size, input_size, num_filters], dtype=tf.float32,
+                            initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+        b = tf.get_variable("b", shape=[num_filters], dtype=tf.float32,
+                            initializer=tf.zeros_initializer(), regularizer=regularizer)
+        outputs = tf.nn.conv1d(inputs, W, 1, padding='SAME') + b
         outputs = tf.nn.leaky_relu(outputs)
         outputs = tf.nn.dropout(outputs, keep_prob=keep_prob)  # [batch_size, max_len, num_filters]
     return outputs
@@ -17,24 +19,28 @@ def dense_layer(inputs, kernel_size, num_filters, keep_prob, scope, regularizer=
 def fc_layer(inputs, output_dim, keep_prob, scope, regularizer=None):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         input_size = inputs.get_shape()[-1]
-        W = tf.get_variable("W", shape=[input_size, output_dim],
-                            initializer=tf.truncated_normal_initializer(), regularizer=regularizer)
-        b = tf.get_variable("b", shape=[output_dim],
-                            initializer=tf.constant_initializer(0.1), regularizer=regularizer)
-        outputs = tf.einsum("abc,cd->abd", inputs, W) + b
+        W = tf.get_variable("W", shape=[input_size, output_dim], dtype=tf.float32,
+                            initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+        b = tf.get_variable("b", shape=[output_dim], dtype=tf.float32,
+                            initializer=tf.zeros_initializer(), regularizer=regularizer)
+
+        if inputs.shape.ndims == 3:
+            outputs = tf.einsum("abc,cd->abd", inputs, W) + b
+        else:
+            outputs = tf.matmul(inputs, W) + b
         outputs = tf.nn.leaky_relu(outputs)
         outputs = tf.nn.dropout(outputs, keep_prob)
     return outputs, W
 
 def get_masked_weights(inputs, seq_len, max_len):
     seq_mask = tf.sequence_mask(seq_len, max_len, dtype=tf.float32)  # [batch_size, max_len]
-    seq_mask = tf.expand_dims(seq_mask, -1)  # [batch_size, max_len, 1]
-    outputs = inputs*seq_mask + (seq_mask - 1) * 1e9
-    outputs = tf.nn.softmax(outputs, axis=1)
+    seq_mask = tf.expand_dims(seq_mask, 1)  # [batch_size, 1, max_len]
+    outputs = inputs * seq_mask + (seq_mask - 1) * 1e9
+    outputs = tf.nn.softmax(outputs, axis=-1)
     return outputs
 
 
-class SDA(object):
+class DSA(object):
     def __init__(self, max_len_left, max_len_right, vocab_size,
                  embedding_size, num_hidden,
                  d_1, d_l, k_1, k_2, num_layers, d_c,
@@ -63,21 +69,21 @@ class SDA(object):
             self.length_right = self.get_length(self.input_right)
 
         with tf.name_scope('dense_layers'):
-            X_1_left  = dense_layer(self.emb_left, 1, d_1, self.dropout_keep_prob, 'dense_layer_1')
-            X_1_right = dense_layer(self.emb_right, 1, d_1, self.dropout_keep_prob, 'dense_layer_1')
+            X_1_left  = dense_layer(self.emb_left, 1, d_1, self.dropout_keep_prob, 'dense_layer_1', regularizer)
+            X_1_right = dense_layer(self.emb_right, 1, d_1, self.dropout_keep_prob, 'dense_layer_1', regularizer)
 
             k_size_list = [k_1, k_2]
             layer_outputs_left = [[X_1_left], [X_1_left]]
             layer_outputs_right = [[X_1_right], [X_1_right]]
             for k in range(2):
-                for l in range(2, num_layers+1):
-                    temp_inputs_left  = tf.concat(layer_outputs_left[k], axis=1)
-                    temp_inputs_right = tf.concat(layer_outputs_right[k], axis=1)
+                for l in range(2, num_layers + 1):
+                    temp_inputs_left  = tf.concat(layer_outputs_left[k], axis=-1)
+                    temp_inputs_right = tf.concat(layer_outputs_right[k], axis=-1)
 
                     X_i_left  = dense_layer(temp_inputs_left, k_size_list[k], d_l, self.dropout_keep_prob,
-                                           'dense_layer_{}_{}'.format(k, l))
+                                           'dense_layer_{}_{}'.format(k, l), regularizer)
                     X_i_right = dense_layer(temp_inputs_right, k_size_list[k], d_l, self.dropout_keep_prob,
-                                           'dense_layer_{}_{}'.format(k, l))
+                                           'dense_layer_{}_{}'.format(k, l), regularizer)
 
                     layer_outputs_left[k].append(X_i_left)
                     layer_outputs_right[k].append(X_i_right)
@@ -85,10 +91,10 @@ class SDA(object):
             concat_outputs_left  = [self.emb_left] + layer_outputs_left[0] + layer_outputs_left[1]
             concat_outputs_right = [self.emb_right] + layer_outputs_right[0] + layer_outputs_right[1]
 
-            self.X_c_left  = dense_layer(tf.concat(concat_outputs_left, 1), 1, d_c, self.dropout_keep_prob,
-                                   'dense_layer_c')
-            self.X_c_right = dense_layer(tf.concat(concat_outputs_right, 1), 1, d_c, self.dropout_keep_prob,
-                                   'dense_layer_c')
+            self.X_c_left  = dense_layer(tf.concat(concat_outputs_left, -1), 1, d_c, self.dropout_keep_prob,
+                                   'dense_layer_c', regularizer)
+            self.X_c_right = dense_layer(tf.concat(concat_outputs_right, -1), 1, d_c, self.dropout_keep_prob,
+                                   'dense_layer_c', regularizer)
 
 
         with tf.name_scope('dynamic_self_attention'):
@@ -96,26 +102,26 @@ class SDA(object):
             Z_right = []
             W_j = []
             for j in range(num_attentions):
-                X_hat_left, W  = fc_layer(self.X_c_left, d_o, self.dropout_keep_prob, 'dsa_{}'.format(j), regularizer)
-                X_hat_right, _ = fc_layer(self.X_c_right, d_o, self.dropout_keep_prob, 'dsa_{}'.format(j), regularizer)
+                X_hat_left, W  = fc_layer(self.X_c_left, d_o, 1.0, 'dsa_{}'.format(j), regularizer)
+                X_hat_right, _ = fc_layer(self.X_c_right, d_o, 1.0, 'dsa_{}'.format(j), regularizer)
 
-                q_left = tf.zeros(shape=[X_hat_left.get_shape()[0], max_len_left], dtype=tf.float32)
-                q_right = tf.zeros(shape=[X_hat_right.get_shape()[0], max_len_right], dtype=tf.float32)
+                q_left = tf.zeros(shape=[tf.shape(X_hat_left)[0], 1, max_len_left], dtype=tf.float32)
+                q_right = tf.zeros(shape=[tf.shape(X_hat_right)[0], 1, max_len_right], dtype=tf.float32)
 
                 for r in range(num_iter):
                     a_left = get_masked_weights(q_left, self.length_left, max_len_left)
-                    s_left = tf.einsum('ab,dbc->dac', a_left, X_hat_left)  # [batch_size, 1, d_o]
+                    s_left = tf.matmul(a_left, X_hat_left)  # [batch_size, 1, d_o]
                     z_left = tf.nn.tanh(s_left)
-                    q_left = q_left + tf.reduce_sum(tf.multiply(X_hat_left, z_left), axis=-1)
+                    q_left = q_left + tf.expand_dims(tf.reduce_sum(tf.multiply(X_hat_left, z_left), axis=-1), 1)
 
                     a_right = get_masked_weights(q_right, self.length_right, max_len_right)
-                    s_right = tf.einsum('ab,dbc->dac', a_right, X_hat_right)  # [batch_size, 1, d_o]
+                    s_right = tf.matmul(a_right, X_hat_right)  # [batch_size, 1, d_o]
                     z_right = tf.nn.tanh(s_right)
-                    q_right = q_right + tf.reduce_sum(tf.multiply(X_hat_right, z_right), axis=-1)
+                    q_right = q_right + tf.expand_dims(tf.reduce_sum(tf.multiply(X_hat_right, z_right), axis=-1), 1)
 
                     if r == num_iter-1:
-                        Z_left.append(z_left)
-                        Z_right.append(z_right)
+                        Z_left.append(tf.reshape(z_left, shape=[-1, d_o]))
+                        Z_right.append(tf.reshape(z_right, shape=[-1, d_o]))
                 W_j.append(W)
 
 
@@ -127,22 +133,22 @@ class SDA(object):
 
 
         with tf.name_scope('mlp_layer'):
-            self.V_left  = tf.concat(Z_left, axis=1)
-            self.V_right = tf.concat(Z_right, axis=1)
+            self.V_left  = tf.concat(Z_left, axis=-1)
+            self.V_right = tf.concat(Z_right, axis=-1)
             self.V = tf.concat([self.V_left, self.V_right, tf.abs(self.V_left-self.V_right),
                                 tf.multiply(self.V_left, self.V_right)], axis=-1)
 
-            output = fc_layer(self.V, num_hidden, self.dropout_keep_prob, 'fc_1', regularizer=regularizer)
+            output, _ = fc_layer(self.V, num_hidden, self.dropout_keep_prob, 'fc_1', regularizer=regularizer)
             # has a shortcut connection
-            self.full_out = fc_layer(tf.concat([self.V, output], axis=-1), num_hidden, self.dropout_keep_prob, 'fc_2',
+            self.full_out, _ = fc_layer(tf.concat([self.V, output], axis=-1), num_hidden, self.dropout_keep_prob, 'fc_2',
                                      regularizer=regularizer)
 
         with tf.name_scope("output"):
             W = tf.get_variable(
                 "W_output",
-                shape=[num_hidden, 2],
+                shape=[num_hidden, 2], dtype=tf.float32,
                 initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
-            b = tf.get_variable("b_output", dtype=tf.float32, initializer=tf.constant_initializer(0.1),
+            b = tf.get_variable("b_output", shape=[2], dtype=tf.float32, initializer=tf.constant_initializer(0.1),
                                 regularizer= regularizer)
             self.scores = tf.nn.xw_plus_b(self.full_out, W, b, name="scores")
             self.predictions = tf.argmax(self.scores, 1, name="predictions")
@@ -165,8 +171,15 @@ class SDA(object):
         return tf.cast(length, tf.int32)
 
 if __name__ == '__main__':
-    pass
-
+    import numpy as np
+    a = tf.constant([[2,3], [2,2.]], dtype=tf.float32)
+    b = tf.nn.softmax(a)
+    c = np.array([[1,0], [0, 1]], dtype=np.float32)
+    d = -tf.reduce_mean(c * tf.log(b))
+    with tf.Session() as sess:
+        b_, d_ = sess.run([b, d])
+        print(b_)
+        print(d_)
 
 
 
