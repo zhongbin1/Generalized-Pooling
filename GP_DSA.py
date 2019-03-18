@@ -100,12 +100,12 @@ class GP_DSA(object):
 
                 for r in range(num_iter):
                     a_left = get_masked_weights(q_left, self.length_left, max_len_left)
-                    s_left = tf.reduce_sum(tf.multiply(a_left, X_hat_left), axis=1)  # [batch_size, 1, d_o]
+                    s_left = tf.reduce_sum(tf.multiply(a_left, X_hat_left), axis=1, keepdims=True)  # [batch_size, 1, d_o]
                     z_left = tf.nn.tanh(s_left)
                     q_left = q_left + tf.expand_dims(tf.reduce_sum(tf.multiply(X_hat_left, z_left), axis=-1), -1)
 
                     a_right = get_masked_weights(q_right, self.length_right, max_len_right)
-                    s_right = tf.reduce_sum(tf.multiply(a_right, X_hat_right), axis=1)  # [batch_size, 1, d_o]
+                    s_right = tf.reduce_sum(tf.multiply(a_right, X_hat_right), axis=1, keepdims=True)  # [batch_size, 1, d_o]
                     z_right = tf.nn.tanh(s_right)
                     q_right = q_right + tf.expand_dims(tf.reduce_sum(tf.multiply(X_hat_right, z_right), axis=-1), -1)
 
@@ -136,7 +136,7 @@ class GP_DSA(object):
                 "W_output",
                 shape=[num_hidden, 2], dtype=tf.float32,
                 initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
-            b = tf.get_variable("b_output", dtype=tf.float32, initializer=tf.constant_initializer(0.1),
+            b = tf.get_variable("b_output", dtype=tf.float32, shape=[2], initializer=tf.constant_initializer(0.1),
                                 regularizer= regularizer)
             self.scores = tf.nn.xw_plus_b(self.full_out, W, b, name="scores")
             self.predictions = tf.argmax(self.scores, 1, name="predictions")
